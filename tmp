@@ -1,0 +1,60 @@
+package bbc.cps
+
+import org.json4s.DefaultFormats
+import org.json4s.jackson.JsonMethods.parse
+
+import scala.io.Source
+
+object Offline {
+  implicit val formats = DefaultFormats
+
+  val predicates = Map(
+    "MENTIONS" -> "http://www.bbc.co.uk/ontologies/creativework/mentions",
+    "EDITORIAL_SENSITIVITY" -> "http://www.bbc.co.uk/ontologies/coreconcepts/editorialSensitivity",
+    "ABOUT" -> "http://www.bbc.co.uk/ontologies/passport/predicate/About",
+    "EDITORIAL_TONE" -> "http://www.bbc.co.uk/ontologies/coreconcepts/editorialTone",
+    "RELEVANT_TO" -> "http://www.bbc.co.uk/ontologies/bbc/relevantTo",
+    "EDITORIAL_TONE" -> "http://www.bbc.co.uk/ontologies/coreconcepts/editorialTone",
+    "GENRE" -> "http://www.bbc.co.uk/ontologies/bbc/genre",
+    "LANGUAGE" -> "http://www.bbc.co.uk/ontologies/coreconcepts/language",
+    "FORMAT" -> "http://www.bbc.co.uk/ontologies/cwork/format",
+    "CONTRIBUTOR" -> "contributor",
+    "AUDIENCE" -> "audience")
+
+  def passportPredicates(passport: Passport): Map[String, Boolean] =
+
+    //TODO - Need to deal with no taggins - put an OPTION AROUND THE TAGGINGS JSON?
+    predicates.foldLeft(Map.empty[String, Boolean]) {
+      (result, predicate) => result + (predicate._2 -> passport.taggings.map(_.predicate).contains(predicate._2))
+    }
+
+  def predicateData(filename: String, domain: String): Map[String, Int] =
+    Source.fromFile(filename).getLines
+      .toList
+      .map(parse(_).extract[Passport])
+      .filter(_.home.contains(domain))
+      .zipWithIndex
+      .foldLeft(Map.empty[String, Int]) {
+        (result, passport) => {
+          result ++
+            passportPredicates(passport._1).map {
+              case (k, v) => k -> ((if (v) 1 else 0) + result.getOrElse(k, 0))
+            } + ("passports" -> (passport._2 + 1))
+        }
+      }
+
+  def results(count: Map[String, Int]): Map[String, Double] =
+    (count - "passports").transform((_, value) => value.toDouble / count("passports").toDouble * 100)
+
+  def tidyResults(results: Map[String, Double]): Map[String, String] =
+    results.map { case (key, value) => predicates.find(_._2 == key).get._1 -> {f"$value%1.1f" + "%"}}
+
+  def main(args: Array[String]): Unit = {
+    val domain = args(0)
+    val filename = "/Users/davieg01/passportsLive2.json"
+    val tidyResults = Offline.tidyResults (Offline.results (Offline.predicateData(filename, domain)))
+
+    println(s"\nCompleteness for $domain")
+    println(Tabulator.format(List("Predicate", "Completeness") :: tidyResults.map(x => List(x._1, x._2)).toList))
+  }
+}
